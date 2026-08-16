@@ -1,0 +1,11 @@
+# Binaries
+strand
+baSSdrop
+*.o
+
+# Alignment & Index files
+*.bam
+*.bai
+*.cram
+*.crai
+*.sam
