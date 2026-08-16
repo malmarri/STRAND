@@ -10,7 +10,7 @@ In single-stranded ancient DNA libraries, post-mortem deamination (C &rarr; T) i
 ## Context & Attribution
 This tool allows users to define how many bases from the 5′ and 3′ ends of the original molecule should be targeted for recalibration, instead of removing them across the whole fragment which is overly conservative. Position arithmetic is fully CIGAR-aware: soft-clipped, inserted and deleted bases are handled so that downstream reference coordinates are never shifted.
 
-*The original concept was inspired by [pontussk] bassdrop [https://github.com/pontussk](https://github.com/pontussk/baSSdrop)).*
+*The original concept was inspired by bassdrop [https://github.com/pontussk/baSSdrop]
 
 ## Installation
 First, clone the repository to your local machine:
