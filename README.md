@@ -1,8 +1,6 @@
 # STRAND
 **S**ingle-strand **T**ransition **R**ecalibration for **A**ncient **N**ucleic **D**NA
 
-Tool to recalibrate (downgrade) base quality scores in a strand-aware manner for single-stranded ancient DNA library-derived data.
-
 ## Purpose
 In single-stranded ancient DNA libraries, post-mortem deamination (C &rarr; T) is strand-specific. 
 `STRAND` targets these specific transition types at a user-defined set of SNP coordinates. It identifies bases that match the expected strand-specific damage profile, and downgrades their base quality score to **0** (`!`). This keeps a substantial amount of data that is lost in comparison to trimming bases from each end of a fragment to remove damage.
