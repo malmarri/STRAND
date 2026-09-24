@@ -1,6 +1,8 @@
 # STRAND
 **S**ingle-strand **T**ransition **R**ecalibration for **A**ncient **N**ucleic **D**NA
 
+**Version 1.1**
+
 ## Purpose
 In single-stranded ancient DNA libraries, post-mortem deamination (C &rarr; T) is strand-specific. 
 `STRAND` targets these specific transition types at a user-defined set of SNP coordinates. It identifies bases that match the expected strand-specific damage profile, and downgrades their base quality score to **0** (`!`). This keeps a substantial amount of data that is lost in comparison to trimming bases from each end of a fragment to remove damage.
@@ -20,23 +22,46 @@ cd STRAND
 ## Compilation
 Compile the tool using any standard C++ compiler:
 ```bash
-g++ -O3 strand.cpp -o strand
+g++ -std=c++11 -O3 strand.cpp -o strand
 ```
 
 ## Usage
 The tool reads SAM text from `stdin` and writes SAM text to `stdout`. It is typically used by piping `samtools view` into it:
 
 ```bash
-samtools view -h input.bam | ./strand <path_to_SNP_file> <bases_from_start> <bases_from_end> | samtools view -bS - > output_recalibrated.bam
+samtools view -h input.bam | ./strand [--unmerged] <path_to_SNP_file> <bases_from_start> <bases_from_end> | samtools view -bS - > output_recalibrated.bam
 ```
+
+> [!IMPORTANT]
+> **Input reads must be merged (or single-end, adapter-trimmed) by default.** STRAND infers the strand of the original molecule from the read's orientation, which is only valid when each alignment represents a whole molecule. For unmerged paired-end reads, R2 is sequenced from the complementary strand, so its damage would be missed; the same limitation applies to [pileupCaller's `--singleStrandMode`](https://github.com/stschiff/sequenceTools). STRAND therefore stops with an error if it encounters a paired-end alignment (FLAG `0x1`) unless `--unmerged` is given.
+
+Run `./strand --version` to print the installed version.
 
 ### Parameters
 1. **`<path_to_SNP_file>`**: A tab-separated file (no header) containing known SNPs: `[Chr] [Pos] [Ref] [Alt]`.
-2. **`<bases_from_start>`**: Number of bases from the **5' end of the original molecule** to recalibrate. For forward reads this corresponds to the start of the BAM sequence string; for reverse reads it corresponds to the end (since BAM stores the reverse complement). Soft-clipped and inserted bases are excluded from the window count.
+2. **`<bases_from_start>`**: Number of bases from the **5' end of the original molecule** to recalibrate. For forward reads this corresponds to the start of the BAM sequence string; for reverse reads it corresponds to the end (since BAM stores the reverse complement). The window is anchored to the first/last aligned (non-soft-clipped) base; inserted bases inside the window count toward its length (distance is measured along the read, i.e. the molecule), while deleted reference bases do not. Inserted bases themselves are never recalibrated, since they have no reference coordinate.
 3. **`<bases_from_end>`**: Number of bases from the **3' end of the original molecule** to recalibrate.
 
 > [!NOTE]
 > Damage patterns are often not symmetrical across an ancient fragment, the parameters above allow you to control the number of bases from each end to recalibrate. It is recommended to assess the damage patterns for your sample empirically using a method like mapdamage/damageprofiler and then choose an appropriate number of bases for recalibration.
+
+### Experimental: `--unmerged`
+> [!WARNING]
+> This option is **experimental**. It has been validated on simulated data only, not yet on real sequencing data.
+
+With `--unmerged`, STRAND also handles unmerged paired-end reads. Merged and single-end reads in the same BAM are processed exactly as without the option.
+- **Strand:** R1 is assumed to sequence the original molecule; R2 sequences its complement, so its molecule strand is the opposite of its mapping orientation (a reverse-mapped R2 is checked at C/T SNPs, a forward-mapped R2 at G/A SNPs).
+- **Windows:** the molecule's ends are taken from the fragment extent (`min(POS, PNEXT)` to `+|TLEN|`), so each base's distance to *both* molecule ends is exact: a mate that stops short of a molecule end gets no window there, while short or overlapping inserts are handled correctly.
+- **Unknown fragment length** (mate unmapped or `TLEN = 0`): the alignment's own edges are treated as molecule ends, which is conservative (may downgrade some undamaged bases, never misses damage).
+
+> [!CAUTION]
+> The R1 = original strand assumption holds for standard single-stranded protocols (Gansauge & Meyer), but other library preparations may differ. Before using this option, confirm it on your data, e.g. with DamageProfiler run separately on R1 and R2: C→T should be elevated at the 5′ end of R1.
+
+### Checks and diagnostics
+- Chromosome names are matched with or without a `chr` prefix (e.g. BAM `chr1` ↔ SNP file `1`); other naming schemes (e.g. `23` for X) must match exactly.
+- The run aborts if no C/T or G/A transitions could be loaded from the SNP file (e.g. an unconverted 6-column EIGENSTRAT `.snp`), or if the window sizes are not non-negative integers.
+- Alignments with a missing (`*`) QUAL string are passed through unchanged.
+- A summary is printed to `stderr` at the end, with a warning if no alignments fell on a contig present in the SNP file.
 
 ## Input SNP File Format
 The file should be tab-separated and contain at least 4 columns: `[Chr] [Pos] [Ref] [Alt]`. All known SNPs (e.g. 1240K, 1000G, HGDP data) can be included; the program will only focus on the appropriate transitions to downgrade base quality.
@@ -76,8 +101,14 @@ Two test files are provided in `test_data/`. Both use `known_snps.txt` (C→T tr
 ./strand test_data/known_snps.txt 5 2 < test_data/test_indels.sam
 ```
 - `read3_fwd_softclip` (`3S17M`, pos=103): quality `!!!1!!111111111111!1` — 5′ window anchored to first mapped base (ref=103); recalibrates refs 104, 105, 118
-- `read4_fwd_insertion` (`2M1I17M`, pos=100): quality `1!11111111111111111!` — inserted base skipped; recalibrates refs 101, 118
+- `read4_fwd_insertion` (`2M1I17M`, pos=100): quality `1!11111111111111111!` — the inserted base occupies one window slot, so the 5′ window covers refs 100–103 and ref 104 is not recalibrated; recalibrates refs 101, 118
 - `read5_fwd_deletion` (`2M1D17M`, pos=100): quality `1!1!!111111111111!1` — deletion advances reference correctly; recalibrates refs 101, 104, 105, 118
+
+**Unmerged read simulation test** (experimental `--unmerged`; requires `samtools` and `python3`):
+```bash
+pe_test/run_test.sh
+```
+Simulates 3,000 damaged single-stranded molecules, writes each as both a merged read and an unmerged pair into one BAM, and checks STRAND's output against the simulation truth: every damaged SNP base in a molecule-end window must be downgraded, nothing else may be (except where fragment length is unknown), and merged and unmerged representations of the same molecule must give identical results.
 
 ## License
 

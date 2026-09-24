@@ -9,3 +9,6 @@ baSSdrop
 *.cram
 *.crai
 *.sam
+
+# Test fixtures
+!test_data/*.sam
