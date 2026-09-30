@@ -11,7 +11,7 @@
 
 using namespace std;
 
-static const char* STRAND_VERSION = "1.1";
+static const char* STRAND_VERSION = "1.2";
 
 // CIGAR-aware mapping: maps read index -> 1-based reference position.
 // Returns -1 for soft-clips and insertions.
@@ -95,19 +95,28 @@ bool parseWindow(const char* s, int& out) {
 
 int main(int argc, char* argv[]) {
     bool unmerged_mode = false;
+    bool all_mode = false;
     bool bad_option = false;
     vector<char*> args;
     for (int a = 1; a < argc; a++) {
         string arg = argv[a];
         if (arg == "--version" || arg == "-v") { cout << "STRAND " << STRAND_VERSION << "\n"; return 0; }
         if (arg == "--unmerged") unmerged_mode = true;
+        else if (arg == "--all") all_mode = true;
         else if (arg.compare(0, 2, "--") == 0) { cerr << "Error: unknown option " << arg << "\n"; bad_option = true; }
         else args.push_back(argv[a]);
     }
-    if (bad_option || args.size() != 3) {
+    if (all_mode && args.size() == 3) {
+        cerr << "Error: --all recalibrates whole fragments; do not also give <bases_from_start> <bases_from_end>.\n";
+        bad_option = true;
+    }
+    if (bad_option || args.size() != (all_mode ? 1u : 3u)) {
         cerr << "STRAND " << STRAND_VERSION << " - Single-strand Transition Recalibration for Ancient Nucleic DNA\n";
         cerr << "Usage: " << argv[0] << " [--unmerged] <path_to_SNP_file> <bases_from_start> <bases_from_end>\n";
+        cerr << "       " << argv[0] << " [--unmerged] --all <path_to_SNP_file>\n";
         cerr << "Example: " << argv[0] << " known_snps.txt 5 2\n";
+        cerr << "  --all       recalibrate strand-appropriate SNP bases along the whole fragment\n";
+        cerr << "              instead of only within the end windows\n";
         cerr << "  --unmerged  EXPERIMENTAL: also handle unmerged paired-end reads\n";
         cerr << "              (assumes R1 sequences the original molecule strand)\n";
         cerr << "  --version   print version and exit\n";
@@ -115,8 +124,8 @@ int main(int argc, char* argv[]) {
     }
     const char* snpPath = args[0];
 
-    int bases_from_start, bases_from_end;
-    if (!parseWindow(args[1], bases_from_start) || !parseWindow(args[2], bases_from_end)) {
+    int bases_from_start = 0, bases_from_end = 0;
+    if (!all_mode && (!parseWindow(args[1], bases_from_start) || !parseWindow(args[2], bases_from_end))) {
         cerr << "Error: <bases_from_start> and <bases_from_end> must be non-negative integers.\n";
         return 1;
     }
@@ -189,7 +198,10 @@ int main(int argc, char* argv[]) {
     }
 
     cerr << "SNP list loaded: " << n_transitions << " transitions across " << id2chr.size() << " contigs.\n";
-    cerr << "Restricting recalibration to first " << bases_from_start << " and last " << bases_from_end << " mapped bases.\n";
+    if (all_mode)
+        cerr << "Recalibrating strand-appropriate SNP bases along the whole fragment (--all).\n";
+    else
+        cerr << "Restricting recalibration to first " << bases_from_start << " and last " << bases_from_end << " mapped bases.\n";
     if (unmerged_mode)
         cerr << "EXPERIMENTAL --unmerged mode: assuming R1 = original molecule strand, R2 = its complement.\n";
 
@@ -308,7 +320,7 @@ int main(int argc, char* argv[]) {
             // distFrom5prime/distFrom3prime are in alignment orientation; map to molecule ends
             int molDist5 = reverse ? distFrom3prime : distFrom5prime;
             int molDist3 = reverse ? distFrom5prime : distFrom3prime;
-            bool in_trim_window = molDist5 < bases_from_start || molDist3 < bases_from_end;
+            bool in_trim_window = all_mode || molDist5 < bases_from_start || molDist3 < bases_from_end;
 
             if (in_trim_window) {
                 if (target_snps.find(refPos[i]) != target_snps.end()) {

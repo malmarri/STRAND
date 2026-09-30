@@ -64,6 +64,7 @@ def main(truth_p, snps_p, sam_p, w5, w3, label):
 
     stats = defaultdict(lambda: defaultdict(int))
     down = defaultdict(lambda: defaultdict(set))   # mid -> "M"/"P" -> downgraded ref positions
+    covered = defaultdict(lambda: defaultdict(set))  # mid -> "M"/"P" -> aligned ref positions
     examples = []
 
     for line in open(sam_p):
@@ -88,6 +89,7 @@ def main(truth_p, snps_p, sam_p, w5, w3, label):
 
         expected, observed, damaged_at_snp = set(), set(), set()
         for ri, rp in aligned_positions(pos, cigar):
+            covered[int(mid)][kind].add(rp)
             d5 = (mol_hi - rp) if m["rev"] else (rp - mol_lo)
             d3 = (rp - mol_lo) if m["rev"] else (mol_hi - rp)
             in_window = d5 < w5 or d3 < w3
@@ -114,12 +116,14 @@ def main(truth_p, snps_p, sam_p, w5, w3, label):
                 examples.append(f"{name} flag={flag} {cigar}: missed={sorted(expected - observed)} "
                                 f"extra={sorted(observed - expected)}")
 
-    # Merged vs unmerged consistency (molecules with both mates mapped)
+    # Merged vs unmerged consistency (molecules present in both forms with both mates mapped),
+    # over the positions covered by both representations (mates may leave an unsequenced gap)
     consistent = inconsistent = 0
     for mid, kinds in down.items():
-        if mols[mid]["mate_unmapped"]:
+        if mols[mid]["mate_unmapped"] or not covered[mid]["M"] or not covered[mid]["P"]:
             continue
-        if kinds["M"] == kinds["P"]:
+        shared = covered[mid]["M"] & covered[mid]["P"]
+        if kinds["M"] & shared == kinds["P"] & shared:
             consistent += 1
         else:
             inconsistent += 1
@@ -138,7 +142,8 @@ def main(truth_p, snps_p, sam_p, w5, w3, label):
     print("-" * len(hdr))
     print(f"{'TOTAL':<34}{tot['reads']:>6}{tot['expected']:>8}{tot['downgraded']:>8}{tot['missed']:>8}"
           f"{tot['extra']:>7}{tot['damage_at_snp']:>9}{tot['damage_leaked']:>8}{tot['reads_wrong']:>7}")
-    print(f"Merged vs unmerged downgraded positions identical for {consistent}/{consistent + inconsistent} molecules")
+    if consistent + inconsistent:
+        print(f"Merged vs unmerged downgraded positions identical for {consistent}/{consistent + inconsistent} molecules")
     for e in examples:
         print("  e.g.", e)
     ok = tot["reads_wrong"] == 0 and tot["damage_leaked"] == 0 and inconsistent == 0

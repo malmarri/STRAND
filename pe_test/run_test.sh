@@ -42,5 +42,19 @@ for w in "10 2" "0 7" "3 0" "1 1" "20 20"; do
     python3 validate.py "$OUT/truth.tsv" "$OUT/snps.txt" "$OUT/w.sam" "$1" "$2" x | grep RESULT || status=1
 done
 
+echo -e "\n[5] --all: every strand-appropriate SNP base on every read is downgraded"
+BIG=1000000   # validator window larger than any molecule == whole fragment
+./strand --all "$OUT/snps.txt" < "$OUT/merged_only.sam" 2>/dev/null > "$OUT/all_merged.sam"
+python3 validate.py "$OUT/truth.tsv" "$OUT/snps.txt" "$OUT/all_merged.sam" $BIG $BIG "--all, merged only" | grep -E "TOTAL|RESULT" || status=1
+samtools view -h "$OUT/test.bam" | ./strand --unmerged --all "$OUT/snps.txt" 2>/dev/null > "$OUT/all_mixed.sam"
+python3 validate.py "$OUT/truth.tsv" "$OUT/snps.txt" "$OUT/all_mixed.sam" $BIG $BIG "--all --unmerged, mixed BAM" | grep -E "TOTAL|identical|RESULT" || status=1
+
+echo -e "\n[6] --all matches windows larger than any read"
+samtools view -h "$OUT/test.bam" | ./strand --unmerged "$OUT/snps.txt" $BIG $BIG 2>/dev/null > "$OUT/big.sam"
+if cmp -s "$OUT/all_mixed.sam" "$OUT/big.sam"; then echo "PASS: identical"; else echo "FAIL: outputs differ"; status=1; fi
+
+echo -e "\n[7] --all together with window sizes is rejected"
+if ./strand --all "$OUT/snps.txt" 5 3 < /dev/null 2>/dev/null; then echo "FAIL: accepted"; status=1; else echo "PASS"; fi
+
 echo; [ $status -eq 0 ] && echo "ALL TESTS PASSED" || echo "SOME TESTS FAILED"
 exit $status

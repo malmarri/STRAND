@@ -1,7 +1,7 @@
 # STRAND
 **S**ingle-strand **T**ransition **R**ecalibration for **A**ncient **N**ucleic **D**NA
 
-**Version 1.1**
+**Version 1.2**
 
 ## Purpose
 In single-stranded ancient DNA libraries, post-mortem deamination (C &rarr; T) is strand-specific. 
@@ -29,7 +29,11 @@ g++ -std=c++11 -O3 strand.cpp -o strand
 The tool reads SAM text from `stdin` and writes SAM text to `stdout`. It is typically used by piping `samtools view` into it:
 
 ```bash
+# End windows: recalibrate SNP bases near the molecule ends only
 samtools view -h input.bam | ./strand [--unmerged] <path_to_SNP_file> <bases_from_start> <bases_from_end> | samtools view -bS - > output_recalibrated.bam
+
+# Whole fragment: recalibrate strand-appropriate SNP bases along the entire fragment
+samtools view -h input.bam | ./strand [--unmerged] --all <path_to_SNP_file> | samtools view -bS - > output_recalibrated.bam
 ```
 
 > [!IMPORTANT]
@@ -45,6 +49,19 @@ Run `./strand --version` to print the installed version.
 > [!NOTE]
 > Damage patterns are often not symmetrical across an ancient fragment, the parameters above allow you to control the number of bases from each end to recalibrate. It is recommended to assess the damage patterns for your sample empirically using a method like mapdamage/damageprofiler and then choose an appropriate number of bases for recalibration.
 
+### Whole-fragment mode: `--all`
+With `--all`, the end windows are replaced by the whole fragment: every aligned base at a C/T SNP on a forward-strand molecule, and at a G/A SNP on a reverse-strand molecule, is set to quality 0. `<bases_from_start>` and `<bases_from_end>` are not given in this mode. This is the same strand-aware principle as pileupCaller's `--singleStrandMode`, applied to the BAM instead of at genotype calling.
+
+| Data | Suggested mode |
+|---|---|
+| UDG-treated / partial-UDG libraries (damage restricted to the terminal bases) | End windows, which retain more data |
+| Non-UDG libraries, especially low-coverage pseudohaploid calling (residual C→T damage also occurs in the fragment interior) | `--all` |
+
+Only molecules of the damage-prone strand are affected at each SNP, so transition SNPs keep roughly half their coverage (the opposite-strand molecules) and transversion SNPs keep all of it. `--all` can be combined with `--unmerged`.
+
+> [!IMPORTANT]
+> In both modes STRAND only lowers base qualities; it does not remove bases. The downstream genotype caller must filter on base quality (e.g. `samtools mpileup -Q 20`, or pileupCaller's minimum base quality) for the recalibration to take effect.
+
 ### Experimental: `--unmerged`
 > [!WARNING]
 > This option is **experimental**. It has been validated on simulated data only, not yet on real sequencing data.
@@ -59,7 +76,7 @@ With `--unmerged`, STRAND also handles unmerged paired-end reads. Merged and sin
 
 ### Checks and diagnostics
 - Chromosome names are matched with or without a `chr` prefix (e.g. BAM `chr1` ↔ SNP file `1`); other naming schemes (e.g. `23` for X) must match exactly.
-- The run aborts if no C/T or G/A transitions could be loaded from the SNP file (e.g. an unconverted 6-column EIGENSTRAT `.snp`), or if the window sizes are not non-negative integers.
+- The run aborts if no C/T or G/A transitions could be loaded from the SNP file (e.g. an unconverted 6-column EIGENSTRAT `.snp`), if the window sizes are not non-negative integers, or if window sizes are given together with `--all`.
 - Alignments with a missing (`*`) QUAL string are passed through unchanged.
 - A summary is printed to `stderr` at the end, with a warning if no alignments fell on a contig present in the SNP file.
 
@@ -85,6 +102,14 @@ samtools view -h input.bam | \
   samtools view -bS - > output_recalibrated.bam
 ```
 
+To recalibrate strand-appropriate transitions along the whole fragment instead:
+
+```bash
+samtools view -h input.bam | \
+  ./strand --all known_snps.txt | \
+  samtools view -bS - > output_recalibrated.bam
+```
+
 ## Testing
 
 Two test files are provided in `test_data/`. Both use `known_snps.txt` (C→T transitions at refs 101, 104, 105, 115, 118) with trim values `5 2`.
@@ -104,11 +129,18 @@ Two test files are provided in `test_data/`. Both use `known_snps.txt` (C→T tr
 - `read4_fwd_insertion` (`2M1I17M`, pos=100): quality `1!11111111111111111!` — the inserted base occupies one window slot, so the 5′ window covers refs 100–103 and ref 104 is not recalibrated; recalibrates refs 101, 118
 - `read5_fwd_deletion` (`2M1D17M`, pos=100): quality `1!1!!111111111111!1` — deletion advances reference correctly; recalibrates refs 101, 104, 105, 118
 
-**Unmerged read simulation test** (experimental `--unmerged`; requires `samtools` and `python3`):
+**Whole-fragment test** (`--all`):
+```bash
+./strand --all test_data/known_snps.txt < test_data/test.sam
+```
+- `read1_forward`: quality `1!11!!111111111!11!1` (all C/T SNPs: refs 101, 104, 105, 115, 118)
+- `read2_reverse`: quality `1!!11111111111!!11!1` (all G/A SNPs: refs 101, 102, 114, 115, 118)
+
+**Simulation test** (experimental `--unmerged` and `--all`; requires `samtools` and `python3`):
 ```bash
 pe_test/run_test.sh
 ```
-Simulates 3,000 damaged single-stranded molecules, writes each as both a merged read and an unmerged pair into one BAM, and checks STRAND's output against the simulation truth: every damaged SNP base in a molecule-end window must be downgraded, nothing else may be (except where fragment length is unknown), and merged and unmerged representations of the same molecule must give identical results.
+Simulates 3,000 damaged single-stranded molecules, writes each as both a merged read and an unmerged pair into one BAM, and checks STRAND's output against the simulation truth: every damaged SNP base in a molecule-end window must be downgraded, nothing else may be (except where fragment length is unknown), and merged and unmerged representations of the same molecule must give identical results. It also checks that `--all` downgrades every strand-appropriate SNP base on every read, and gives the same output as windows longer than any read.
 
 ## License
 
