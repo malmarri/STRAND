@@ -52,11 +52,6 @@ Run `./strand --version` to print the installed version.
 ### Whole-fragment mode: `--all`
 With `--all`, the end windows are replaced by the whole fragment: every aligned base at a C/T SNP on a forward-strand molecule, and at a G/A SNP on a reverse-strand molecule, is set to quality 0. `<bases_from_start>` and `<bases_from_end>` are not given in this mode. This is the same strand-aware principle as pileupCaller's `--singleStrandMode`, applied to the BAM instead of at genotype calling.
 
-| Data | Suggested mode |
-|---|---|
-| UDG-treated / partial-UDG libraries (damage restricted to the terminal bases) | End windows, which retain more data |
-| Non-UDG libraries, especially low-coverage pseudohaploid calling (residual C→T damage also occurs in the fragment interior) | `--all` |
-
 Only molecules of the damage-prone strand are affected at each SNP, so transition SNPs keep roughly half their coverage (the opposite-strand molecules) and transversion SNPs keep all of it. `--all` can be combined with `--unmerged`.
 
 > [!IMPORTANT]
